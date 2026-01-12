@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Vocab Garden v9.4 - Synced & Fixed</title>
+    <title>Vocab Garden - GitHub Edition</title>
     
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -23,12 +23,25 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, deleteDoc, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getAnalytics } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-analytics.js";
 
-        const firebaseConfig = JSON.parse(window.__firebase_config || '{}');
+        // --- CẤU HÌNH FIREBASE CHÍNH THỨC ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyDqqyRq1s9Dncq0zck5Bwmca2s-LcjihMU",
+            authDomain: "vocab-25b77.firebaseapp.com",
+            projectId: "vocab-25b77",
+            storageBucket: "vocab-25b77.firebasestorage.app",
+            messagingSenderId: "16170478730",
+            appId: "1:16170478730:web:4963bc0259febe34995173",
+            measurementId: "G-CD0K0JX525"
+        };
+        // ------------------------------
+
         const app = initializeApp(firebaseConfig);
+        const analytics = getAnalytics(app);
         const auth = getAuth(app);
         const db = getFirestore(app);
-        const appId = window.__app_id || 'vocab-garden-default';
+        const appId = 'vocab-garden-github'; 
 
         window.db = db;
         window.auth = auth;
@@ -142,7 +155,10 @@
                     if (b.charAt(i - 1) === a.charAt(j - 1)) {
                         matrix[i][j] = matrix[i - 1][j - 1];
                     } else {
-                        matrix[i][j] = Math.min(matrix[i - 1][j - 1] + 1, Math.min(matrix[i][j - 1] + 1, matrix[i - 1][j] + 1));
+                        matrix[i][j] = Math.min(
+                            matrix[i - 1][j - 1] + 1,
+                            Math.min(matrix[i][j - 1] + 1, matrix[i - 1][j] + 1)
+                        );
                     }
                 }
             }
@@ -273,8 +289,6 @@
 
         const App = () => {
             const [user, setUser] = useState(null);
-            
-            // "Sync ID" is effectively the username if logged in.
             const [loggedInUser, setLoggedInUser] = useState(localStorage.getItem('garden_username') || '');
             const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
             const [loginUsername, setLoginUsername] = useState('');
@@ -316,49 +330,43 @@
             // --- AUTH INIT ---
             useEffect(() => {
                 const initAuth = async () => {
-                    if (typeof window.__initial_auth_token !== 'undefined' && window.__initial_auth_token) {
-                        await window.signInWithCustomToken(window.auth, window.__initial_auth_token);
-                    } else {
-                        await window.signInAnonymously(window.auth);
-                    }
+                    const auth = window.auth;
+                    window.signInAnonymously(auth).catch(err => {
+                        console.error("Firebase Auth Error:", err);
+                        alert("Lỗi kết nối Firebase. Kiểm tra cấu hình!");
+                    });
                 };
                 initAuth();
                 window.onAuthStateChanged(window.auth, setUser);
             }, []);
 
-            // --- DATA LOADING LOGIC (Fix: Switch between Private and Public path) ---
+            // --- BACKGROUND MOOD LOGIC (FIXED) ---
+            // Nền sẽ sáng nếu Đã học (History) HOẶC Đang học (Reviewing/Learning)
+            useEffect(() => {
+                const hasStudied = (practiceHistory[todayStr] || 0) > 0;
+                const isActive = isReviewing || isLearning;
+                document.body.className = (hasStudied || isActive) ? 'mood-sunny' : 'mood-gloomy';
+            }, [practiceHistory, todayStr, isReviewing, isLearning]);
+
+            // --- DATA LOADING ---
             useEffect(() => {
                 if (!user) return;
 
                 let unsubVocab, unsubHistory;
 
-                // Path Decision Logic
-                // If loggedInUser is set -> Use Public Path (Synced)
-                // If not set -> Use Private Path (Device Local / Guest)
-                
                 if (loggedInUser) {
-                    // --- SYNC MODE (Public Data) ---
-                    // Using 'gardens' collection in public/data
-                    // Doc ID = loggedInUser
                     const docRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'gardens', loggedInUser);
-                    
                     unsubVocab = window.onSnapshot(docRef, (docSnap) => {
                         if (docSnap.exists()) {
                             const data = docSnap.data();
-                            // Data is stored as a single large object in Public Mode to bypass permissions on subcollections if any
-                            // Structure: { key: '...', vocab: [...], history: {...}, gardenerName: '...' }
                             if (data.vocab) setVocabList(data.vocab);
                             if (data.history) setPracticeHistory(data.history);
                             if (data.gardenerName) setGardenerName(data.gardenerName);
                         } else {
-                            // Should not happen if login succeeded, but handle empty
-                            setVocabList([]);
-                            setPracticeHistory({});
+                            setVocabList([]); setPracticeHistory({});
                         }
-                    });
+                    }, (err) => console.log("Sync Read Error:", err));
                 } else {
-                    // --- GUEST MODE (Private Data - users/{uid}) ---
-                    // NOTE: This uses the standard private path which works for the current anonymous user
                     const historyRef = window.doc(window.db, 'artifacts', window.appId, 'users', user.uid, 'settings', 'history');
                     unsubHistory = window.onSnapshot(historyRef, (docSnap) => {
                         if (docSnap.exists()) {
@@ -377,93 +385,62 @@
                     });
                 }
 
-                return () => { 
-                    if(unsubVocab) unsubVocab(); 
-                    if(unsubHistory) unsubHistory(); 
-                };
+                return () => { if(unsubVocab) unsubVocab(); if(unsubHistory) unsubHistory(); };
             }, [user, loggedInUser]);
 
-            // --- SAVE LOGIC (Consolidated) ---
+            // --- SAVE LOGIC ---
             const saveData = async (newVocab, newHistory) => {
                 if (!user) return;
-
                 const currentVocab = newVocab || vocabList;
                 const currentHistory = newHistory || practiceHistory;
                 const currentName = gardenerName;
 
-                // Update Leaderboard Logic (Common for both modes if we want guests to rank? Maybe only logged in users)
-                // Let's allow everyone on leaderboard
                 const mastered = currentVocab.filter(w => w.status === 'mastered').length;
                 let title = "Người gieo hạt";
                 if (mastered <= 150) title = "Người chăm chồi";
                 if (mastered <= 500) title = "Nghệ nhân vườn";
                 if (mastered > 500) title = "Bậc thầy rừng già";
                 
-                // Identify ID for Leaderboard
                 const lbId = loggedInUser || user.uid;
                 const leaderboardRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'leaderboard', lbId);
-                window.setDoc(leaderboardRef, {
-                    userId: lbId,
-                    name: currentName,
-                    masteredCount: mastered,
-                    title: title
-                });
+                window.setDoc(leaderboardRef, { userId: lbId, name: currentName, masteredCount: mastered, title: title });
 
                 if (loggedInUser) {
-                    // --- SAVE TO PUBLIC SYNC DOC ---
                     const docRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'gardens', loggedInUser);
-                    // We need to preserve the 'key' (password). Since we might not have it in state if we just loaded data, 
-                    // we do a merge. But we are overwriting arrays.
-                    // Ideally we should have the key. For now, assume merge:true works or we just write data fields.
-                    await window.setDoc(docRef, {
-                        vocab: currentVocab,
-                        history: currentHistory,
-                        gardenerName: currentName
-                        // Key is already there, merge will keep it
-                    }, { merge: true });
-
+                    await window.setDoc(docRef, { vocab: currentVocab, history: currentHistory, gardenerName: currentName }, { merge: true });
                 } else {
-                    // --- SAVE TO PRIVATE GUEST DOC ---
                     const historyRef = window.doc(window.db, 'artifacts', window.appId, 'users', user.uid, 'settings', 'history');
                     window.setDoc(historyRef, { history: currentHistory, gardenerName: currentName }, { merge: true });
-
-                    // For vocab, we need to be careful. The previous 'saveWordToCloud' handled individual docs.
-                    // To keep it simple and consistent with the new architecture, let's keep using individual docs for Guest mode
-                    // because it's better for bandwidth if not syncing a huge blob.
-                    // But `saveData` is called with full list. 
-                    // We will just iterate and save (inefficient but safe for prototype) OR just save changed word.
-                    // To avoid complexity, let's revert to saving individual words only when changed.
                 }
             };
 
-            // Wrapper for saving single word change
             const saveSingleWord = (word) => {
                 if(loggedInUser) {
-                    // In Sync Mode, we must save the whole list because it's a single doc
                     const newList = vocabList.map(w => w.id === word.id ? word : w);
-                    // If it's a new word not in list yet
                     if(!vocabList.find(w => w.id === word.id)) newList.push(word);
                     saveData(newList, null);
                 } else {
-                    // Guest Mode
                     if(!user) return;
                     const docRef = window.doc(window.db, 'artifacts', window.appId, 'users', user.uid, 'vocab', word.id);
                     window.setDoc(docRef, word);
                 }
             };
 
-            const deleteSingleWord = (wordId) => {
-                if(loggedInUser) {
-                    const newList = vocabList.filter(w => w.id !== wordId);
-                    saveData(newList, null);
-                } else {
-                    if(!user) return;
-                    const docRef = window.doc(window.db, 'artifacts', window.appId, 'users', user.uid, 'vocab', wordId);
-                    window.deleteDoc(docRef);
+            const deleteWord = (id) => {
+                if (confirm("Bạn muốn xóa từ này?")) {
+                    const newList = vocabList.filter(w => w.id !== id);
+                    setVocabList(newList);
+                    if (loggedInUser) {
+                        saveData(newList, null);
+                    } else {
+                        if (!user) return;
+                        const docRef = window.doc(window.db, 'artifacts', window.appId, 'users', user.uid, 'vocab', id);
+                        window.deleteDoc(docRef);
+                        saveData(newList, null); 
+                    }
                 }
             };
 
-            // --- LOGIN HANDLER ---
             const handleLogin = async () => {
                 if (!loginUsername.trim() || !loginKey.trim()) { setLoginError("Thiếu thông tin"); return; }
                 const safeName = loginUsername.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
@@ -474,41 +451,22 @@
                     const snap = await window.getDoc(docRef);
                     if (snap.exists()) {
                         if (snap.data().key === loginKey) {
-                            // Success
-                            setLoggedInUser(safeName);
-                            localStorage.setItem('garden_username', safeName);
-                            setIsSyncModalOpen(false);
+                            setLoggedInUser(safeName); localStorage.setItem('garden_username', safeName); setIsSyncModalOpen(false);
                         } else {
                             setLoginError("Sai mã bảo vệ!");
                         }
                     } else {
-                        // Create New
-                        await window.setDoc(docRef, {
-                            key: loginKey,
-                            vocab: [],
-                            history: {},
-                            gardenerName: loginUsername,
-                            created: new Date().toISOString()
-                        });
-                        setLoggedInUser(safeName);
-                        localStorage.setItem('garden_username', safeName);
-                        setIsSyncModalOpen(false);
+                        await window.setDoc(docRef, { key: loginKey, vocab: [], history: {}, gardenerName: loginUsername, created: new Date().toISOString() });
+                        setLoggedInUser(safeName); localStorage.setItem('garden_username', safeName); setIsSyncModalOpen(false);
                     }
-                } catch (e) {
-                    console.error(e);
-                    setLoginError("Lỗi kết nối.");
-                }
+                } catch (e) { console.error(e); setLoginError("Lỗi kết nối hoặc quyền truy cập."); }
             };
 
             const handleLogout = () => {
-                setLoggedInUser('');
-                localStorage.removeItem('garden_username');
-                setVocabList([]); // Clear to let Guest mode reload
-                setPracticeHistory({});
-                setGardenerName('');
+                setLoggedInUser(''); localStorage.removeItem('garden_username');
+                setVocabList([]); setPracticeHistory({}); setGardenerName('');
             };
 
-            // Fetch Leaderboard
             useEffect(() => {
                 if (activeTab !== 'leaderboard') return;
                 const leaderboardRef = window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'leaderboard');
@@ -519,13 +477,9 @@
                 return () => unsub();
             }, [activeTab]);
 
-            // --- APP LOGIC ---
-            useEffect(() => {
-                const hasStudied = (practiceHistory[todayStr] || 0) > 0;
-                document.body.className = hasStudied ? 'mood-sunny' : 'mood-gloomy';
-            }, [practiceHistory, todayStr]);
-
+            // --- GAME LOGIC & HELPERS ---
             const masteredCount = useMemo(() => vocabList.filter(w => w.status === 'mastered').length, [vocabList]);
+            
             const levelInfo = useMemo(() => {
                 if (masteredCount < 50) return { title: "Người gieo hạt", color: "text-slate-500", icon: "Sprout" };
                 if (masteredCount <= 150) return { title: "Người chăm chồi", color: "text-lime-600", icon: "Leaf" };
@@ -622,8 +576,8 @@
                     }
                 }
 
-                // Optimistic Update
-                setVocabList(prev => prev.map(w => w.id === updatedWord.id ? updatedWord : w));
+                const newList = vocabList.map(w => w.id === updatedWord.id ? updatedWord : w);
+                setVocabList(newList);
                 saveSingleWord(updatedWord);
 
                 if (currentWordIndex < sessionQueue.length - 1) {
@@ -633,9 +587,6 @@
                     const currentLocalStr = getLocalDateStr(new Date());
                     const newHistory = { ...practiceHistory, [currentLocalStr]: (practiceHistory[currentLocalStr] || 0) + 1 };
                     setPracticeHistory(newHistory);
-                    
-                    // Bulk update history (and full list if sync mode) to ensure consistency
-                    const newList = vocabList.map(w => w.id === updatedWord.id ? updatedWord : w);
                     saveData(newList, newHistory);
                     
                     setIsReviewing(false); setActiveTab('dashboard');
@@ -648,11 +599,8 @@
                 if (!term || !def) return;
                 if (vocabList.some(w => w.term.toLowerCase() === term.toLowerCase())) { setWarehouseError(`Từ "${term}" đã có trong kho!`); setShake(true); setTimeout(() => { setShake(false); setWarehouseError(''); }, 3000); return; }
                 const newWord = { id: generateId(), term, ipa: newIpa.trim(), definition: def, dateAdded: new Date().toISOString(), nextReviewDate: new Date().toISOString(), streak: 0, status: 'queue' };
-                
-                // Optimistic
                 setVocabList(prev => [...prev, newWord]);
                 saveSingleWord(newWord);
-                
                 setNewTerm(''); setNewIpa(''); setNewDef(''); document.getElementById('term-input')?.focus();
             };
 
@@ -660,7 +608,14 @@
                 if (confirm("Bạn muốn xóa từ này?")) {
                     const newList = vocabList.filter(w => w.id !== id);
                     setVocabList(newList);
-                    deleteSingleWord(id);
+                    if (loggedInUser) {
+                        saveData(newList, null);
+                    } else {
+                        if (!user) return;
+                        const docRef = window.doc(window.db, 'artifacts', window.appId, 'users', user.uid, 'vocab', id);
+                        window.deleteDoc(docRef);
+                        saveData(newList, null); 
+                    }
                 }
             };
 
@@ -676,7 +631,7 @@
 
             const exportData = () => {
                 const data = JSON.stringify({ vocabList, practiceHistory }); const blob = new Blob([data], { type: 'application/json' }); const url = URL.createObjectURL(blob);
-                const a = document.createElement('a'); a.href = url; a.download = `garden_backup_v9.json`; a.click();
+                const a = document.createElement('a'); a.href = url; a.download = `garden_backup_v8.json`; a.click();
             };
 
             const filteredList = useMemo(() => vocabList.filter(w => {
@@ -699,10 +654,7 @@
             return (
                 <div className="max-w-2xl mx-auto px-4 pb-32 pt-6 safe-pt">
                     <div className="sync-status">
-                        {user ? (
-                            loggedInUser ? <span className="text-emerald-600 font-bold bg-emerald-100 px-2 py-0.5 rounded-full flex items-center gap-1"><Icon name="Cloud" size={10} /> {loggedInUser}</span> 
-                            : <span className="text-slate-400 flex items-center gap-1"><Icon name="User" size={10} /> Khách</span>
-                        ) : <><Icon name="Loader" size={14} className="animate-spin" /> ...</>}
+                        {user ? (loggedInUser ? <span className="text-emerald-600 font-bold bg-emerald-100 px-2 py-0.5 rounded-full flex items-center gap-1"><Icon name="Cloud" size={10} /> {loggedInUser}</span> : <span className="text-slate-400 flex items-center gap-1"><Icon name="User" size={10} /> Khách</span>) : <><Icon name="Loader" size={14} className="animate-spin" /> ...</>}
                     </div>
                     
                     <header className="glass rounded-[2.5rem] p-6 mb-8 card-shadow flex items-center justify-between border-white/50 relative">
@@ -730,30 +682,20 @@
                         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in">
                             <div className="bg-white rounded-[2rem] p-8 w-full max-w-sm shadow-2xl animate-in zoom-in-95">
                                 <h3 className="font-bold text-xl text-slate-800 mb-2 flex items-center gap-2"><Icon name="Key" className="text-emerald-500" /> Đồng bộ hóa</h3>
-                                <p className="text-sm text-slate-500 mb-6">Đăng nhập để lưu trữ và học trên nhiều thiết bị. Tên chưa có sẽ tự tạo mới.</p>
-                                
+                                <p className="text-sm text-slate-500 mb-6">Nhập Tên đăng nhập & Mã bảo vệ. Dữ liệu sẽ tự động tải về.</p>
                                 <div className="space-y-4">
-                                    <div>
-                                        <label className="text-[10px] font-bold uppercase text-slate-400 tracking-widest ml-1">Tên đăng nhập (viết liền)</label>
-                                        <input value={loginUsername} onChange={e => setLoginUsername(e.target.value)} className="w-full bg-slate-100 p-4 rounded-xl font-bold text-lg outline-none border-2 border-transparent focus:border-emerald-500 focus:bg-white transition-all" placeholder="vd: tungchi" />
-                                    </div>
-                                    <div>
-                                        <label className="text-[10px] font-bold uppercase text-slate-400 tracking-widest ml-1">Mã bảo vệ</label>
-                                        <input type="password" value={loginKey} onChange={e => setLoginKey(e.target.value)} className="w-full bg-slate-100 p-4 rounded-xl font-bold text-lg outline-none border-2 border-transparent focus:border-emerald-500 focus:bg-white transition-all" placeholder="******" />
-                                    </div>
+                                    <div><label className="text-[10px] font-bold uppercase text-slate-400 tracking-widest ml-1">Tên đăng nhập (viết liền)</label><input value={loginUsername} onChange={e => setLoginUsername(e.target.value)} className="w-full bg-slate-100 p-4 rounded-xl font-bold text-lg outline-none border-2 border-transparent focus:border-emerald-500 focus:bg-white transition-all" placeholder="vd: hello" /></div>
+                                    <div><label className="text-[10px] font-bold uppercase text-slate-400 tracking-widest ml-1">Mã bảo vệ</label><input type="password" value={loginKey} onChange={e => setLoginKey(e.target.value)} className="w-full bg-slate-100 p-4 rounded-xl font-bold text-lg outline-none border-2 border-transparent focus:border-emerald-500 focus:bg-white transition-all" placeholder="******" /></div>
                                 </div>
-
                                 {loginError && <div className="text-red-500 text-xs font-bold mt-2 bg-red-50 p-2 rounded-lg flex items-center gap-1"><Icon name="AlertCircle" size={12} /> {loginError}</div>}
-
                                 <div className="mt-6 space-y-2">
                                     <button onClick={handleLogin} className="w-full btn-gradient text-white py-4 rounded-xl font-bold active:scale-95 transition-transform shadow-lg">Vào Vườn Ngay</button>
-                                    <button onClick={() => setIsSyncModalOpen(false)} className="w-full text-slate-400 py-2 font-bold text-xs hover:text-slate-600">Để sau (Chế độ khách)</button>
+                                    <button onClick={() => setIsSyncModalOpen(false)} className="w-full text-slate-400 py-2 font-bold text-xs hover:text-slate-600">Đóng</button>
                                 </div>
                             </div>
                         </div>
                     )}
 
-                    {/* Dashboard */}
                     {activeTab === 'dashboard' && (
                         <div className="space-y-8 animate-in fade-in duration-700">
                             <StreakPath history={practiceHistory} today={today} />
@@ -769,7 +711,6 @@
                         </div>
                     )}
 
-                    {/* Warehouse */}
                     {activeTab === 'warehouse' && (
                         <div className="space-y-6 animate-in slide-in-from-bottom-4 duration-500">
                             <div className={`glass rounded-[2.5rem] p-7 card-shadow transition-all border-white/60 ${shake ? 'animate-shake border-red-300' : ''}`}>
@@ -783,12 +724,52 @@
                                     <div className="space-y-4 animate-in fade-in">
                                         <p className="text-[11px] text-slate-400 italic bg-white/50 p-4 rounded-2xl border border-dashed border-emerald-200">Dán dữ liệu 3 cột (Anh - IPA - Việt) từ Excel/Sheets vào đây.</p>
                                         <textarea value={bulkInput} onChange={e => setBulkInput(e.target.value)} rows="6" className="w-full p-4 bg-white/60 rounded-2xl outline-none border-2 border-dashed border-slate-200 focus:border-emerald-500 transition-all" placeholder="English	/ipa/	Vietnamese..."></textarea>
-                                        <button onClick={() => { const lines = bulkInput.split('\n').filter(l => l.trim()); const newWords = []; lines.forEach(line => { const parts = line.split('\t'); const term = parts[0]?.trim(); const ipa = parts.length === 3 ? parts[1]?.trim() : ''; const def = parts.length === 3 ? parts[2]?.trim() : parts[1]?.trim(); if (term && def && !vocabList.find(w => w.term.toLowerCase() === term.toLowerCase())) { const newWord = { id: generateId(), term, ipa, definition: def, dateAdded: new Date().toISOString(), nextReviewDate: new Date().toISOString(), streak: 0, status: 'queue' }; newWords.push(newWord); } }); 
-                                            // Bulk save logic
+                                        <button onClick={() => { 
+                                            const lines = bulkInput.split('\n').filter(l => l.trim()); 
+                                            const newWords = []; 
+                                            lines.forEach(line => { 
+                                                const parts = line.split('\t'); 
+                                                const term = parts[0]?.trim(); 
+                                                const ipa = parts.length === 3 ? parts[1]?.trim() : ''; 
+                                                const def = parts.length === 3 ? parts[2]?.trim() : parts[1]?.trim(); 
+                                                if (term && def && !vocabList.find(w => w.term.toLowerCase() === term.toLowerCase())) { 
+                                                    const newWord = { 
+                                                        id: generateId(), 
+                                                        term, 
+                                                        ipa, 
+                                                        definition: def, 
+                                                        dateAdded: new Date().toISOString(), 
+                                                        nextReviewDate: new Date().toISOString(), 
+                                                        streak: 0, 
+                                                        status: 'queue' 
+                                                    }; 
+                                                    newWords.push(newWord); 
+                                                } 
+                                            });
+
+                                            if (newWords.length === 0) return;
+
+                                            // Save Logic Updated
                                             const combinedList = [...vocabList, ...newWords];
-                                            setVocabList(combinedList);
-                                            saveData(combinedList, null);
-                                            setBulkInput(''); setAddMode('single'); 
+                                            setVocabList(combinedList); 
+
+                                            if (loggedInUser) {
+                                                // Sync Mode: Save full list
+                                                saveData(combinedList, null);
+                                            } else {
+                                                // Guest Mode: Batch write
+                                                if (user) { 
+                                                    const batch = window.writeBatch(window.db); 
+                                                    newWords.forEach(w => {
+                                                        const docRef = window.doc(window.db, 'artifacts', window.appId, 'users', user.uid, 'vocab', w.id); 
+                                                        batch.set(docRef, w); 
+                                                    });
+                                                    batch.commit(); 
+                                                } 
+                                            }
+                                            
+                                            setBulkInput(''); 
+                                            setAddMode('single'); 
                                         }} className="w-full btn-gradient text-white p-5 rounded-2xl font-black uppercase tracking-widest shadow-xl">Nhập hàng loạt</button>
                                     </div>
                                 )}
@@ -849,18 +830,9 @@
                                         playSound('correct');
                                         const currentWord = sessionQueue[currentWordIndex];
                                         const updatedWord = { ...currentWord, status: 'learning', nextReviewDate: new Date(Date.now() + 86400000).toISOString() };
-                                        
-                                        // Update state immediately
-                                        const newList = vocabList.map(w => w.id === currentWord.id ? updatedWord : w);
-                                        setVocabList(newList);
-                                        saveSingleWord(updatedWord);
-                                        
-                                        if (currentWordIndex < sessionQueue.length - 1) {
-                                            setCurrentWordIndex(prev => prev + 1);
-                                        } else {
-                                            setIsLearning(false); setCurrentWordIndex(0);
-                                            confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
-                                        }
+                                        setVocabList(prev => prev.map(w => w.id === currentWord.id ? updatedWord : w));
+                                        saveSingleWord(updatedWord); 
+                                        if (currentWordIndex < sessionQueue.length - 1) { setCurrentWordIndex(prev => prev + 1); } else { setIsLearning(false); setCurrentWordIndex(0); confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } }); }
                                     }} className="w-full btn-gradient text-white p-6 rounded-[2rem] font-black text-xl shadow-xl active:scale-95 flex items-center justify-center gap-3 transition-all">Đã thuộc <Icon name="Check" size={24} /></button>
                                 </div>
                             </div>
