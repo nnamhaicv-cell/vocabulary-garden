@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Vocab Garden - GitHub Edition</title>
+    <title>Vocab Garden v9.7 - Daily Master</title>
     
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -25,7 +25,7 @@
         import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, deleteDoc, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { getAnalytics } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-analytics.js";
 
-        // --- CẤU HÌNH FIREBASE CHÍNH THỨC ---
+        // --- CẤU HÌNH FIREBASE ---
         const firebaseConfig = {
             apiKey: "AIzaSyDqqyRq1s9Dncq0zck5Bwmca2s-LcjihMU",
             authDomain: "vocab-25b77.firebaseapp.com",
@@ -35,7 +35,6 @@
             appId: "1:16170478730:web:4963bc0259febe34995173",
             measurementId: "G-CD0K0JX525"
         };
-        // ------------------------------
 
         const app = initializeApp(firebaseConfig);
         const analytics = getAnalytics(app);
@@ -207,7 +206,8 @@
             } catch (e) {}
         };
 
-        const SRS_INTERVALS = [1, 3, 7, 15, 30, 60, 180, 365];
+        // SRS Intervals: Removed 365, will handle Mastered (7) manually
+        const SRS_INTERVALS = [1, 3, 7, 15, 30, 60, 180]; 
         const generateId = () => Math.random().toString(36).substring(2, 11) + Date.now().toString(36);
         const shuffleArray = (array) => { const s = [...array]; for (let i = s.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [s[i], s[j]] = [s[j], s[i]]; } return s; };
 
@@ -327,33 +327,28 @@
             const todayTimestamp = today.getTime();
             const todayStr = getLocalDateStr(new Date());
 
-            // --- AUTH INIT ---
             useEffect(() => {
                 const initAuth = async () => {
                     const auth = window.auth;
                     window.signInAnonymously(auth).catch(err => {
                         console.error("Firebase Auth Error:", err);
-                        alert("Lỗi kết nối Firebase. Kiểm tra cấu hình!");
                     });
                 };
                 initAuth();
                 window.onAuthStateChanged(window.auth, setUser);
             }, []);
 
-            // --- BACKGROUND MOOD LOGIC (FIXED) ---
-            // Nền sẽ sáng nếu Đã học (History) HOẶC Đang học (Reviewing/Learning)
+            // BACKGROUND MOOD FIX
             useEffect(() => {
                 const hasStudied = (practiceHistory[todayStr] || 0) > 0;
+                // Nếu đang ôn (isReviewing/isLearning) hoặc đã học -> Nắng
                 const isActive = isReviewing || isLearning;
                 document.body.className = (hasStudied || isActive) ? 'mood-sunny' : 'mood-gloomy';
             }, [practiceHistory, todayStr, isReviewing, isLearning]);
 
-            // --- DATA LOADING ---
             useEffect(() => {
                 if (!user) return;
-
                 let unsubVocab, unsubHistory;
-
                 if (loggedInUser) {
                     const docRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'gardens', loggedInUser);
                     unsubVocab = window.onSnapshot(docRef, (docSnap) => {
@@ -377,24 +372,20 @@
                             setGardenerName(`Khách thăm vườn`);
                         }
                     });
-
                     const vocabRef = window.collection(window.db, 'artifacts', window.appId, 'users', user.uid, 'vocab');
                     unsubVocab = window.onSnapshot(vocabRef, (snapshot) => {
                         const words = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                         setVocabList(words);
                     });
                 }
-
                 return () => { if(unsubVocab) unsubVocab(); if(unsubHistory) unsubHistory(); };
             }, [user, loggedInUser]);
 
-            // --- SAVE LOGIC ---
             const saveData = async (newVocab, newHistory) => {
                 if (!user) return;
                 const currentVocab = newVocab || vocabList;
                 const currentHistory = newHistory || practiceHistory;
                 const currentName = gardenerName;
-
                 const mastered = currentVocab.filter(w => w.status === 'mastered').length;
                 let title = "Người gieo hạt";
                 if (mastered <= 150) title = "Người chăm chồi";
@@ -445,7 +436,6 @@
                 if (!loginUsername.trim() || !loginKey.trim()) { setLoginError("Thiếu thông tin"); return; }
                 const safeName = loginUsername.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
                 if (safeName.length < 3) { setLoginError("Tên quá ngắn"); return; }
-
                 const docRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'gardens', safeName);
                 try {
                     const snap = await window.getDoc(docRef);
@@ -477,9 +467,7 @@
                 return () => unsub();
             }, [activeTab]);
 
-            // --- GAME LOGIC & HELPERS ---
             const masteredCount = useMemo(() => vocabList.filter(w => w.status === 'mastered').length, [vocabList]);
-            
             const levelInfo = useMemo(() => {
                 if (masteredCount < 50) return { title: "Người gieo hạt", color: "text-slate-500", icon: "Sprout" };
                 if (masteredCount <= 150) return { title: "Người chăm chồi", color: "text-lime-600", icon: "Leaf" };
@@ -539,7 +527,6 @@
                     const allowedErrors = ans.length > 8 ? 2 : (ans.length > 3 ? 1 : 0);
                     return dist <= allowedErrors;
                 });
-                
                 setIsCorrectFeedback(isCorrect);
                 setHasChecked(true);
                 playSound(isCorrect ? 'correct' : 'wrong');
@@ -568,7 +555,8 @@
                     if (isCorrectFeedback) {
                         const newStreak = updatedWord.streak + 1;
                         if (newStreak >= 7 && updatedWord.status !== 'mastered') { playSound('level-up'); confetti({ particleCount: 150, spread: 100, origin: { y: 0.6 } }); }
-                        const daysToAdd = SRS_INTERVALS[newStreak] || 365;
+                        // UPDATED: Cổ thụ ôn hàng ngày (1 ngày), còn lại theo SRS
+                        const daysToAdd = newStreak >= 7 ? 1 : (SRS_INTERVALS[newStreak] || 365);
                         const nextDate = new Date(); nextDate.setDate(nextDate.getDate() + daysToAdd); nextDate.setHours(0, 0, 0, 0);
                         updatedWord.streak = newStreak; updatedWord.nextReviewDate = nextDate.toISOString(); updatedWord.status = newStreak >= 7 ? 'mastered' : 'learning';
                     } else {
@@ -588,7 +576,6 @@
                     const newHistory = { ...practiceHistory, [currentLocalStr]: (practiceHistory[currentLocalStr] || 0) + 1 };
                     setPracticeHistory(newHistory);
                     saveData(newList, newHistory);
-                    
                     setIsReviewing(false); setActiveTab('dashboard');
                 }
             };
@@ -631,7 +618,7 @@
 
             const exportData = () => {
                 const data = JSON.stringify({ vocabList, practiceHistory }); const blob = new Blob([data], { type: 'application/json' }); const url = URL.createObjectURL(blob);
-                const a = document.createElement('a'); a.href = url; a.download = `garden_backup_v8.json`; a.click();
+                const a = document.createElement('a'); a.href = url; a.download = `garden_backup_v9.json`; a.click();
             };
 
             const filteredList = useMemo(() => vocabList.filter(w => {
@@ -733,31 +720,19 @@
                                                 const ipa = parts.length === 3 ? parts[1]?.trim() : ''; 
                                                 const def = parts.length === 3 ? parts[2]?.trim() : parts[1]?.trim(); 
                                                 if (term && def && !vocabList.find(w => w.term.toLowerCase() === term.toLowerCase())) { 
-                                                    const newWord = { 
-                                                        id: generateId(), 
-                                                        term, 
-                                                        ipa, 
-                                                        definition: def, 
-                                                        dateAdded: new Date().toISOString(), 
-                                                        nextReviewDate: new Date().toISOString(), 
-                                                        streak: 0, 
-                                                        status: 'queue' 
-                                                    }; 
+                                                    const newWord = { id: generateId(), term, ipa, definition: def, dateAdded: new Date().toISOString(), nextReviewDate: new Date().toISOString(), streak: 0, status: 'queue' }; 
                                                     newWords.push(newWord); 
                                                 } 
                                             });
 
                                             if (newWords.length === 0) return;
 
-                                            // Save Logic Updated
                                             const combinedList = [...vocabList, ...newWords];
                                             setVocabList(combinedList); 
 
                                             if (loggedInUser) {
-                                                // Sync Mode: Save full list
                                                 saveData(combinedList, null);
                                             } else {
-                                                // Guest Mode: Batch write
                                                 if (user) { 
                                                     const batch = window.writeBatch(window.db); 
                                                     newWords.forEach(w => {
@@ -768,8 +743,7 @@
                                                 } 
                                             }
                                             
-                                            setBulkInput(''); 
-                                            setAddMode('single'); 
+                                            setBulkInput(''); setAddMode('single'); 
                                         }} className="w-full btn-gradient text-white p-5 rounded-2xl font-black uppercase tracking-widest shadow-xl">Nhập hàng loạt</button>
                                     </div>
                                 )}
